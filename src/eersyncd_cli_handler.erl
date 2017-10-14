@@ -20,6 +20,9 @@
 -export([parse_arguments/2]).
 -export([handle_command/2, format_request/2, handle_reply/3]).
 
+%% interface for eersyncd_command_handler
+-export([reload/1]).
+
 %% "unused function" warning silencer exports
 -export([println/1, printerr/1, printerr/2]).
 
@@ -96,19 +99,17 @@ handle_command(start = _Command,
     false -> undefined
   end,
   PidFile = proplists:get_value(pidfile, CLIOpts),
-  case file:consult(ConfigPath) of
-    {ok, Configs} ->
-      ok = application:load(eersyncd),
-      lists:foreach(
-        fun({Name, Value}) -> application:set_env(eersyncd, Name, Value) end,
-        proplists:get_value(eersyncd, Configs)
-      ),
+  case config_load(ConfigPath) of
+    {ok, AppEnv, IndiraOpts} ->
+      % TODO: add `indira_disk_h:install(error_logger,_)' call
+      eeindira:set_reload({?MODULE, reload, [ConfigPath]}),
+      eeindira:set_env(eersyncd, AppEnv),
       indira_app:daemonize(eersyncd, [
         {listen, [{?ADMIN_SOCKET_TYPE, Socket}]},
         {command, {?ADMIN_COMMAND_MODULE, []}},
         {start_before, SASLApp},
         {pidfile, PidFile} |
-        proplists:get_value(indira, Configs, [])
+        IndiraOpts
       ]);
     {error, Reason} ->
       {error, Reason}
@@ -262,6 +263,73 @@ help(ScriptName) ->
 %%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
+%%% loading configuration
+%%%---------------------------------------------------------------------------
+
+%% @doc Update application environment from config file and instruct
+%%   application's processes to reread their parameters.
+
+-spec reload(file:filename()) ->
+  ok | {error, term()}.
+
+reload(Path) ->
+  case config_load(Path) of
+    {ok, AppEnv, IndiraOpts} ->
+      % TODO: add `indira_disk_h:reopen(error_logger,_)' call
+      case indira_app:distributed_reconfigure(IndiraOpts) of
+        ok ->
+          eeindira:set_env(eersyncd, AppEnv),
+          % TODO: handle (propagate) reload errors
+          LogHandlers = proplists:get_value(log_handlers, AppEnv, []),
+          % TODO: send reload signal to the candidate modules
+          {ok, _ReloadCandidates} = eersyncd_log:reload(LogHandlers),
+          ok = eersyncd_tcp_sup:reload(),
+          ok;
+        {error, Reason} ->
+          {error, Reason}
+      end;
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Load configuration file.
+
+-spec config_load(file:filename()) ->
+  {ok, AppEnv, IndiraOpts} | {error, term()}
+  when AppEnv :: [{atom(), term()}],
+       IndiraOpts :: [indira_app:daemon_option()].
+
+config_load(Path) ->
+  % TODO: call `toml:read_file(Path, {fun config_validate/4, []})'
+  case file:consult(Path) of
+    {ok, Config} ->
+      {AppEnv, IndiraOpts} = config_build(Config),
+      {ok, AppEnv, IndiraOpts};
+    {error, Reason} ->
+      {error, Reason}
+  end.
+
+%% @doc Build application's and Indira's configuration from values read from
+%%   config file.
+
+-spec config_build(toml:config()) ->
+  {AppEnv, IndiraOpts}
+  when AppEnv :: [{atom(), term()}],
+       IndiraOpts :: [indira_app:daemon_option()].
+
+config_build(Config) ->
+  % TODO: build app environment and Indira options properly
+  AppEnv = proplists:get_value(eersyncd, Config),
+  IndiraOpts = proplists:get_value(indira, Config),
+  {AppEnv, IndiraOpts}.
+
+%-spec config_validate(toml:section(), toml:key(), toml:toml_value(), term()) ->
+%  ok | {ok, term()} | ignore | {error, term()}.
+%
+%config_validate(_Section, _Key, _Value, _Arg) ->
+%  'TODO'.
+
+%%%---------------------------------------------------------------------------
 %%% various helpers
 %%%---------------------------------------------------------------------------
 
@@ -324,6 +392,7 @@ cli_opt(Arg, Opts = #opts{op = Op, args = OpArgs}) when Op /= undefined ->
   _NewOpts = Opts#opts{args = OpArgs ++ [Arg]};
 
 cli_opt(Arg, Opts = #opts{op = undefined}) ->
+  % TODO: add "reopen-logs" command
   case Arg of
     "start"  -> Opts#opts{op = start};
     "status" -> Opts#opts{op = status};

@@ -43,7 +43,35 @@ handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
   log_info(reload, "reloading configuration", []),
-  [{result, todo}];
+  try register('$eersyncd_admin_reload_config', self()) of
+    true ->
+      try eeindira:reload() of
+        ok ->
+          [{result, ok}];
+        {error, reload_not_set} ->
+          [{result, error}, {message, <<"not configured from file">>}];
+        {error, Errors} ->
+          % TODO: change the formatting of the errors
+          log_error(reload, "reload errors", [{errors, {term, Errors}}]),
+          % TODO: explain the errors (`eersyncd_cli_handler:format_error()')
+          [{result, error}, {message, <<"reload errors (TODO: describe)">>}]
+      catch
+        Type:Error ->
+          % XXX: this crash should never happen and is a programming error
+          log_error(reload, "reload crash", [
+            {crash, Type}, {error, {term, Error}},
+            {stack_trace, {term, erlang:get_stacktrace()}}
+          ]),
+          [{result, error},
+            {message, <<"reload function crashed, check logs for details">>}]
+      after
+        unregister('$eersyncd_admin_reload_config')
+      end
+  catch
+    error:badarg ->
+      log_info(reload, "another reload in progress", []),
+      [{result, error}, {message, <<"reload command already in progress">>}]
+  end;
 
 handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
   log_info(dist_start, "starting Erlang networking", []),

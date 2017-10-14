@@ -12,10 +12,11 @@
   {mod, {eersyncd_app, []}},
   {env, [
     {listen, [{any, 1873}]},
-    %{rsyncd_log, "..."}
-    %{rsyncd_conf, "..."}
-    %{cwd, "..."}
+    %{rsyncd_log, "..."},
+    %{rsyncd_conf, "..."},
+    %{cwd, "..."},
     {rsync_path, "/usr/bin/rsync"},
+    %{error_logger_file, "..."},
     {log_handlers, []}
   ]}
 ]}.
