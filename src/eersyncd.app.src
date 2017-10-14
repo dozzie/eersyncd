@@ -1,0 +1,9 @@
+{application, eersyncd, [
+  {description, "experimental rsync daemon"},
+  {vsn, "0.0.0"},
+  {registered, []},
+  {applications, [kernel, stdlib, subproc]},
+  {modules, []},
+  %{mod, {eersyncd_app, []}},
+  {env, []}
+]}.

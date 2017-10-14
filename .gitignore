@@ -1,0 +1,10 @@
+.*.swp
+*.beam
+*.plt
+eersyncd.d
+/.erlang.mk
+/ebin/*.app
+/doc/edoc-info
+/doc/*.png
+/doc/*.html
+/doc/*.css
