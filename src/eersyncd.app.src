@@ -1,9 +1,20 @@
 {application, eersyncd, [
   {description, "experimental rsync daemon"},
   {vsn, "0.0.0"},
-  {registered, []},
+  {registered, [
+    eersyncd_sup,
+    eersyncd_log,
+    eersyncd_tcp_sup,
+    eersyncd_tcp_conn_sup
+  ]},
   {applications, [kernel, stdlib, subproc]},
   {modules, []},
-  %{mod, {eersyncd_app, []}},
-  {env, []}
+  {mod, {eersyncd_app, []}},
+  {env, [
+    {listen, [{any, 1873}]},
+    %{rsyncd_conf, ""}
+    %{cwd, ""}
+    {rsync_path, "/usr/bin/rsync"},
+    {log_handlers, []}
+  ]}
 ]}.
