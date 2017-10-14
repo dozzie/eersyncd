@@ -88,8 +88,8 @@ init([Socket] = _Args) ->
     {client, {str, format_address(PeerAddr, PeerPort)}},
     {local_address, {str, format_address(LocalAddr, LocalPort)}}
   ]),
-  {RsyncPath, ConfigPath, Cwd} = rsync_config(),
-  case rsync_exec(RsyncPath, ConfigPath, Cwd) of
+  {RsyncPath, ConfigPath, LogPath, Cwd} = rsync_config(),
+  case rsync_exec(RsyncPath, ConfigPath, LogPath, Cwd) of
     {ok, Subproc, PID} ->
       eersyncd_log:append_context([{rsync_pid, PID}]),
       eersyncd_log:info("new connection"),
@@ -229,17 +229,25 @@ format_address({A,B,C,D} = _Address, Port) ->
 rsync_config() ->
   {ok, ConfigPath} = application:get_env(rsyncd_conf),
   {ok, RsyncPath} = application:get_env(rsync_path),
+  case application:get_env(rsyncd_log) of
+    {ok, LogPath} -> ok;
+    undefined = LogPath -> ok
+  end,
   case application:get_env(cwd) of
-    {ok, Cwd} -> {RsyncPath, ConfigPath, Cwd};
-    undefined -> {RsyncPath, ConfigPath, undefined}
-  end.
+    {ok, Cwd} -> ok;
+    undefined = Cwd -> ok
+  end,
+  {RsyncPath, ConfigPath, LogPath, Cwd}.
 
 -spec rsync_exec(file:filename(), file:filename(),
-                 file:filename() | undefined) ->
+                 file:filename() | undefined, file:filename() | undefined) ->
   {ok, subproc:handle(), subproc:os_pid()} | {error, term()}.
 
-rsync_exec(RsyncPath, ConfigPath, Cwd) ->
-  RsyncArgs = ["--daemon", "--config", ConfigPath],
+rsync_exec(RsyncPath, ConfigPath, LogPath, Cwd) ->
+  RsyncArgs = case LogPath of
+    undefined -> ["--daemon", "--config", ConfigPath];
+    _         -> ["--daemon", "--config", ConfigPath, "--log-file", LogPath]
+  end,
   BasicOptions = [
     {stdio, bidir}, {type, socket}, {termsig, hup},
     binary, {packet, raw}, {active, once}, {exit_status, true}
