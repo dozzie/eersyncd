@@ -89,8 +89,30 @@ parse_arguments(Args, [DefAdminSocket, DefConfig] = _Defaults) ->
 %% @doc Execute commands more complex than "request -> reply -> print".
 
 handle_command(start = _Command,
-               _Options = #opts{admin_socket = _Socket, options = _CLIOpts}) ->
-  'TODO';
+               _Options = #opts{admin_socket = Socket, options = CLIOpts}) ->
+  ConfigPath = proplists:get_value(config, CLIOpts),
+  SASLApp = case proplists:get_bool(debug, CLIOpts) of
+    true -> sasl;
+    false -> undefined
+  end,
+  PidFile = proplists:get_value(pidfile, CLIOpts),
+  case file:consult(ConfigPath) of
+    {ok, Configs} ->
+      ok = application:load(eersyncd),
+      lists:foreach(
+        fun({Name, Value}) -> application:set_env(eersyncd, Name, Value) end,
+        proplists:get_value(eersyncd, Configs)
+      ),
+      indira_app:daemonize(eersyncd, [
+        {listen, [{?ADMIN_SOCKET_TYPE, Socket}]},
+        {command, {?ADMIN_COMMAND_MODULE, []}},
+        {start_before, SASLApp},
+        {pidfile, PidFile} |
+        proplists:get_value(indira, Configs, [])
+      ]);
+    {error, Reason} ->
+      {error, Reason}
+  end;
 
 handle_command(status = Command,
                Options = #opts{admin_socket = Socket, options = CLIOpts}) ->
