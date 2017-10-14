@@ -1,0 +1,41 @@
+#!/usr/bin/escript
+%%! -env ERL_LIBS deps
+%%----------------------------------------------------------------------------
+
+-define(CLI_MODULE, eersyncd_cli_handler).
+-define(CONFIG_FILE,  "/etc/eersyncd/eersyncd.toml").
+-define(ADMIN_SOCKET, "/var/run/eersyncd/control").
+
+%%----------------------------------------------------------------------------
+
+help() ->
+  help(standard_io).
+help(IO) ->
+  ScriptName = filename:basename(escript:script_name()),
+  io:put_chars(IO, ?CLI_MODULE:help(ScriptName)).
+
+main([])         -> help();
+main(["-h"])     -> help();
+main(["--help"]) -> help();
+
+main(Args) ->
+  Defaults = [?ADMIN_SOCKET, ?CONFIG_FILE],
+  case indira_cli:execute(Args, ?CLI_MODULE, Defaults) of
+    ok ->
+      ok;
+    help ->
+      help();
+    {error, {arguments, Reason}} ->
+      io:fwrite(standard_error, "~s~n~n", [?CLI_MODULE:format_error(Reason)]),
+      help(standard_error),
+      halt(1);
+    {error, Code} when is_integer(Code) ->
+      % error already written to STDERR
+      halt(Code);
+    {error, Reason} ->
+      io:fwrite(standard_error, "~s~n", [?CLI_MODULE:format_error(Reason)]),
+      halt(1)
+  end.
+
+%%----------------------------------------------------------------------------
+%% vim:ft=erlang
