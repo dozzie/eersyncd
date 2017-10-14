@@ -1,0 +1,26 @@
+[rsync]
+root_dir = "/srv/eersyncd"
+modules_config = "/etc/eersyncd/rsyncd.conf"
+
+[tcp]
+listen = ["localhost:1873"]
+
+[ssl]
+listen = ["*:2873"]
+cert_file = "/etc/eersyncd/ssl/rsync.cert.pem"
+key_file  = "/etc/eersyncd/ssl/rsync.key.pem"
+
+[logging]
+log_handlers = ["eersyncd_syslog_h"]
+rsyncd_log = "/var/log/eersyncd/rsync.log"
+
+[erlang]
+node_name = "eersyncd"
+name_type = "shortnames"
+#cookie_file = "/etc/eersyncd/cookie.txt"
+distributed_immediate = false
+
+# file with Erlang system events log
+#log_file = "/var/log/eersyncd/erlang.log"
+
+# vim:ft=dosini
