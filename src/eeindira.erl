@@ -8,6 +8,7 @@
 
 -export([set_env/2, default_env/1]).
 -export([reload/0, set_reload/1]).
+-export([wait_for_start/1, is_started/1]).
 
 -export_type([]).
 
@@ -82,6 +83,8 @@ env_converge(App, Environment) ->
   ),
   ok.
 
+%%%---------------------------------------------------------------------------
+
 %% @doc Call reload function.
 %%
 %% @see set_reload/1
@@ -109,6 +112,35 @@ when is_atom(Mod), is_atom(Fun), is_list(Args) ->
     {error, {already_loaded, indira}} -> ok
   end,
   application:set_env(indira, reload_function, MFA).
+
+%%%---------------------------------------------------------------------------
+
+%% @doc Wait until the specified supervisor (and, transitively, all its
+%%   children) starts properly.
+%%
+%%   On supervisor's start error, `error' is returned.
+
+-spec wait_for_start(pid() | atom()) ->
+  ok | error.
+
+wait_for_start(Supervisor) ->
+  try supervisor:which_children(Supervisor) of
+    _ -> ok
+  catch
+    _:_ -> error
+  end.
+
+%% @doc Check if an application is started.
+
+-spec is_started(atom()) ->
+  boolean().
+
+is_started(App) ->
+  % `{AppName :: atom(), Desc :: string(), Version :: string()}' or `false';
+  % only non-false when the application started successfully (it's still
+  % `false' during boot time)
+  AppEntry = lists:keyfind(App, 1, application:which_applications()),
+  AppEntry /= false.
 
 %%%---------------------------------------------------------------------------
 %%% vim:ft=erlang:foldmethod=marker

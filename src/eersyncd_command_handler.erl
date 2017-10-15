@@ -25,15 +25,15 @@
 
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
                _Args) ->
-  case is_started() of
+  case eeindira:is_started(eersyncd) of
     true  -> [{result, running}];
     false -> [{result, stopped}]
   end;
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
                _Args) ->
-  case wait_for_start() of
-    true  -> [{result, running}];
-    false -> [{result, stopped}]
+  case eeindira:wait_for_start(eersyncd_sup) of
+    ok    -> [{result, running}];
+    error -> [{result, stopped}]
   end;
 
 handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
@@ -167,31 +167,6 @@ parse_reply(_Reply, _Command) ->
 
 hardcoded_reply(daemon_stopped = _Event) -> [{<<"result">>, <<"stopped">>}];
 hardcoded_reply(generic_ok     = _Event) -> [{<<"result">>, <<"ok">>}].
-
-%%%---------------------------------------------------------------------------
-
-%%----------------------------------------------------------
-%% waiting for/checking daemon's start {{{
-
-wait_for_start() ->
-  % XXX: this will wait until the children of top-level supervisor all
-  % started (and each child supervisor waits for its children, transitively)
-  % or the supervisor shuts down due to an error
-  try supervisor:which_children(eersyncd_sup) of
-    _ -> true
-  catch
-    _:_ -> false
-  end.
-
-is_started() ->
-  % `{AppName :: atom(), Desc :: string(), Version :: string()}' or `false';
-  % only non-false when the application started successfully (it's still
-  % `false' during boot time)
-  AppEntry = lists:keyfind(eersyncd, 1, application:which_applications()),
-  AppEntry /= false.
-
-%% }}}
-%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 
