@@ -15,8 +15,10 @@
 .PHONY: all app apps deps search rel relup docs install-docs check tests clean distclean help erlang-mk
 
 ERLANG_MK_FILENAME := $(realpath $(lastword $(MAKEFILE_LIST)))
+export ERLANG_MK_FILENAME
 
-ERLANG_MK_VERSION = 2017.04.25-6-g5922969
+ERLANG_MK_VERSION = 2017.08.28-8-g1e2ab25
+ERLANG_MK_WITHOUT = 
 
 # Make 3.81 and 3.82 are deprecated.
 
@@ -183,13 +185,14 @@ ERLANG_MK_COMMIT ?=
 ERLANG_MK_BUILD_CONFIG ?= build.config
 ERLANG_MK_BUILD_DIR ?= .erlang.mk.build
 
+erlang-mk: WITHOUT ?= $(ERLANG_MK_WITHOUT)
 erlang-mk:
 	git clone $(ERLANG_MK_REPO) $(ERLANG_MK_BUILD_DIR)
 ifdef ERLANG_MK_COMMIT
 	cd $(ERLANG_MK_BUILD_DIR) && git checkout $(ERLANG_MK_COMMIT)
 endif
 	if [ -f $(ERLANG_MK_BUILD_CONFIG) ]; then cp $(ERLANG_MK_BUILD_CONFIG) $(ERLANG_MK_BUILD_DIR)/build.config; fi
-	$(MAKE) -C $(ERLANG_MK_BUILD_DIR)
+	$(MAKE) -C $(ERLANG_MK_BUILD_DIR) WITHOUT='$(strip $(WITHOUT))'
 	cp $(ERLANG_MK_BUILD_DIR)/erlang.mk ./erlang.mk
 	rm -rf $(ERLANG_MK_BUILD_DIR)
 
@@ -510,7 +513,7 @@ ifneq ($(SKIP_DEPS),)
 doc-deps:
 else
 doc-deps: $(ALL_DOC_DEPS_DIRS)
-	$(verbose) for dep in $(ALL_DOC_DEPS_DIRS) ; do $(MAKE) -C $$dep; done
+	$(verbose) set -e; for dep in $(ALL_DOC_DEPS_DIRS) ; do $(MAKE) -C $$dep; done
 endif
 
 # Copyright (c) 2015-2016, Loïc Hoguin <essen@ninenines.eu>
@@ -557,10 +560,20 @@ rebar.config:
 # Configuration.
 
 EDOC_OPTS ?=
+EDOC_SRC_DIRS ?=
+
+define edoc.erl
+	SrcPaths = lists:foldl(fun(P, Acc) ->
+		filelib:wildcard(atom_to_list(P) ++ "/{src,c_src}") ++ Acc
+	end, [], [$(call comma_list,$(patsubst %,'%',$(EDOC_SRC_DIRS)))]),
+	DefaultOpts = [{source_path, SrcPaths}, {subpackages, false}],
+	edoc:application($(1), ".", [$(2)] ++ DefaultOpts),
+	halt(0).
+endef
 
 # Core targets.
 
-ifneq ($(wildcard doc/overview.edoc),)
+ifneq ($(strip $(EDOC_SRC_DIRS)$(wildcard doc/overview.edoc)),)
 docs:: edoc
 endif
 
@@ -569,7 +582,7 @@ distclean:: distclean-edoc
 # Plugin-specific targets.
 
 edoc: distclean-edoc doc-deps
-	$(gen_verbose) $(ERL) -eval 'edoc:application($(PROJECT), ".", [$(EDOC_OPTS)]), halt().'
+	$(gen_verbose) $(call erlang,$(call edoc.erl,$(PROJECT),$(EDOC_OPTS)))
 
 distclean-edoc:
 	$(gen_verbose) rm -f doc/*.css doc/*.html doc/*.png doc/edoc-info
