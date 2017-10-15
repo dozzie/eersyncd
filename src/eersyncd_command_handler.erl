@@ -73,6 +73,21 @@ handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
       [{result, error}, {message, <<"reload command already in progress">>}]
   end;
 
+handle_command([{<<"command">>, <<"reopen_logs">>}] = _Command, _Args) ->
+  log_info(reopen_logs, "reopening log files", []),
+  case application:get_env(eersyncd, error_logger_file) of
+    {ok, Path} ->
+      case indira_disk_h:reopen(error_logger, Path) of
+        ok ->
+          [{result, ok}];
+        {error, Reason} ->
+          [{result, error},
+            {message, iolist_to_binary(indira_disk_h:format_error(Reason))}]
+      end;
+    undefined ->
+      [{result, ok}]
+  end;
+
 handle_command([{<<"command">>, <<"dist_start">>}] = _Command, _Args) ->
   log_info(dist_start, "starting Erlang networking", []),
   case indira_app:distributed_start() of
@@ -113,6 +128,7 @@ format_request(status        = Command) -> [{command, Command}, {wait, false}];
 format_request(status_wait   =_Command) -> [{command, status}, {wait, true}];
 format_request(stop          = Command) -> [{command, Command}];
 format_request(reload_config = Command) -> [{command, Command}];
+format_request(reopen_logs   = Command) -> [{command, Command}];
 format_request(dist_start    = Command) -> [{command, Command}];
 format_request(dist_stop     = Command) -> [{command, Command}].
 

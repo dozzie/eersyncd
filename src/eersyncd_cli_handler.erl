@@ -36,6 +36,7 @@
 
 -record(opts, {
   op :: start | status | stop | reload_config
+      | reopen_logs
       | dist_start | dist_stop,
   admin_socket :: file:filename(),
   options :: [{atom(), term()}],
@@ -597,6 +598,7 @@ cli_opt(Arg, Opts = #opts{op = undefined}) ->
     "status" -> Opts#opts{op = status};
     "stop"   -> Opts#opts{op = stop};
     "reload" -> Opts#opts{op = reload_config};
+    "reopen-logs" -> Opts#opts{op = reopen_logs};
     "dist-erl-start" -> Opts#opts{op = dist_start};
     "dist-erl-stop"  -> Opts#opts{op = dist_stop};
     _ -> {error, bad_command}
