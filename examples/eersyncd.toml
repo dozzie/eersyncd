@@ -1,26 +1,42 @@
-[rsync]
+#
+# eersyncd configuration file
+#
+
+# if `root_dir' is set, all relative paths are anchored to it; if `root_dir'
+# is itself a relative path, it's relative to the location of this file
 root_dir = "/srv/eersyncd"
+
+# configuration for `rsync --daemon', mostly definitions of modules rsync
+# serves
 modules_config = "/etc/eersyncd/rsyncd.conf"
 
+# path to rsync binary
+#rsync_path = "/usr/bin/rsync"
+
 [tcp]
+# TCP addresses to listen on for incoming connections (these addresses are
+# usable with plain rsync)
 listen = ["localhost:1873"]
 
 [ssl]
+# TCP+SSL addresses to listen on for incoming connections (to communicate with
+# such an address, rsync needs to be wrapped with e.g. stunnel(8))
 listen = ["*:2873"]
 cert_file = "/etc/eersyncd/ssl/rsync.cert.pem"
 key_file  = "/etc/eersyncd/ssl/rsync.key.pem"
 
 [logging]
+# eersyncd application logs (mainly: TCP/SSL connections)
 log_handlers = ["eersyncd_syslog_h"]
+# rsync logs
 rsyncd_log = "/var/log/eersyncd/rsync.log"
+# Erlang VM events
+#erlang_log = "/var/log/eersyncd/erlang.log"
 
 [erlang]
 node_name = "eersyncd"
 name_type = "shortnames"
 #cookie_file = "/etc/eersyncd/cookie.txt"
 distributed_immediate = false
-
-# file with Erlang system events log
-#log_file = "/var/log/eersyncd/erlang.log"
 
 # vim:ft=dosini
