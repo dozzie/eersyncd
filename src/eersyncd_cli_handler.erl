@@ -187,6 +187,8 @@ handle_reply(Reply, status = Command, _Options) ->
     stopped ->
       println("eersyncd is stopped"),
       {error, 1};
+    {error, Reason} ->
+      {error, Reason};
     % for future changes in status detection
     Status ->
       {error, {unknown_status, Status}}
@@ -235,10 +237,91 @@ handle_reply(Reply, Command, _Options) ->
 -spec format_error(term()) ->
   iolist().
 
+%% emulate target gen_indira_cli error reporting (verbatim, not tuple-wrapped)
+format_error({arguments, Reason}) ->
+  format_error(Reason);
+format_error({format, Reason}) ->
+  format_error(Reason);
+
+%% errors from `parse_arguments()' (own and `cli_opt()' + argument)
+format_error(too_many_args) ->
+  "too many arguments for the command";
+format_error({{bad_timeout, Value}, _Arg}) ->
+  ["bad timeout value: ", Value];
+format_error({bad_option, Option}) ->
+  ["unrecognized option: ", Option];
+format_error({bad_command, Command}) ->
+  ["unrecognized command: ", Command];
+format_error({excessive_value, Option}) -> % from `indira_cli:foldg()'
+  ["unexpected argument for ", Option];
+format_error({not_enough_args, Option}) -> % from `indira_cli:folds()'
+  ["missing argument for ", Option];
+
+%% errors from `config_load()'
+format_error({config, validate, Where}) ->
+  % TODO: properly dissect `Where'
+  ["config error: invalid value at ", format_term(Where)];
+format_error({config, toml, Reason}) ->
+  ["config error: ", toml:format_error(Reason)];
+format_error({config, bad_config}) ->
+  % FIXME: change this message
+  "config error: missing mandatory value or section passed for a value";
+
+%% errors from `indira_cli:execute()' (TODO: `indira_cli:format_error()')
+format_error({send, bad_request_format}) ->
+  "can't serialize command request (programmer's error)";
+format_error({send, bad_reply_format}) -> % programmer error
+  "can't deserialize reply to the command (programmer's error)";
+format_error({send, timeout}) ->
+  "command request: operation timed out";
+format_error({send, badarg}) ->
+  "bad admin socket address (programmer's error)";
+format_error({send, Posix}) ->
+  ["command request: ", inet:format_error(Posix)];
+format_error({bad_return_value, Return}) ->
+  ["callback returned unexpected value ", format_term(Return),
+    " (programmer's error)"];
+
+%% errors from `indira_app:daemonize()' (TODO: `indira_app:format_error()',
+%% wrap these in a tagged tuple for recognition (`daemonize()',
+%% `distributed_reconfigure()', `indira_setup()'))
+format_error(invalid_listen_spec) ->
+  "Indira setup: invalid listen address specification (programmer's error)";
+format_error(missing_listen_spec) ->
+  "Indira setup: no listen address specified (programmer's error)";
+format_error(invalid_command_handler) ->
+  "Indira setup: invalid admin command handler name (programmer's error)";
+format_error(missing_command_handler) ->
+  "Indira setup: no admin command handler specified (programmer's error)";
+format_error(invalid_pidfile) ->
+  "Indira setup: pidfile name (programmer's error)";
+format_error(invalid_net_config) ->
+  "Indira setup: invalid Erlang networking configuration (programmer's error)";
+format_error(invalid_net_start) ->
+  "Indira setup: invalid Erlang networking autostart flag (programmer's error)";
+
+%% `handle_reply()'
 format_error(Reason) when is_binary(Reason) ->
+  % error message ready to print to the console
   Reason;
+format_error({unknown_status, Status}) ->
+  % `$SCRIPT status' returned unrecognized status
+  ["unrecognized status: ", format_term(Status)];
+format_error(unrecognized_reply) -> % see `?ADMIN_COMMAND_MODULE:parse_reply()'
+  "unrecognized reply to the command (programmer's error)";
+format_error('TODO') ->
+  "command not implemented yet";
+
 format_error(Reason) ->
-  ["error message TODO; error: ", io_lib:print(Reason, 1, 16#ffffffff, -1)].
+  ["unrecognized error: ", format_term(Reason)].
+
+%% @doc Serialize an arbitrary term to a single line of text.
+
+-spec format_term(term()) ->
+  iolist().
+
+format_term(Term) ->
+  io_lib:print(Term, 1, 16#ffffffff, -1).
 
 %% }}}
 %%----------------------------------------------------------
@@ -296,28 +379,36 @@ reload(Path) ->
           {error, Reason}
       end;
     {error, Reason} ->
-      {error, Reason}
+      {error, Reason} % `{error, {config, ...}}'
   end.
 
 %% @doc Load configuration file.
 
 -spec config_load(file:filename()) ->
-  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, term()}
+  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, Reason}
   when AppEnv :: [{atom(), term()}],
        IndiraOpts :: [indira_app:daemon_option()],
-       ErrorLoggerLog :: file:filename() | undefined.
+       ErrorLoggerLog :: file:filename() | undefined,
+       Reason :: {config, validate, Where :: term()}
+               | {config, toml, toml:toml_error()}
+               | {config, bad_config}. % missing mandatory value, section for a value
 
 config_load(Path) ->
   case toml:read_file(Path, {fun config_validate/4, []}) of
     {ok, Config} ->
-      try
-        config_build(Config, filename:dirname(filename:absname(Path)))
+      try config_build(Config, filename:dirname(filename:absname(Path))) of
+        {ok, AppEnv, IndiraOpts, ErrorLoggerLog} ->
+          {ok, AppEnv, IndiraOpts, ErrorLoggerLog};
+        {error, bad_config} ->
+          {error, {config, bad_config}}
       catch
-        throw:{error, Reason} ->
-          {error, Reason}
+        throw:{error, bad_config} ->
+          {error, {config, bad_config}}
       end;
+    {error, {validate, Where, badarg}} ->
+      {error, {config, validate, Where}};
     {error, Reason} ->
-      {error, Reason}
+      {error, {config, toml, Reason}}
   end.
 
 %%----------------------------------------------------------
@@ -413,7 +504,7 @@ config_build(TOMLConfig, TOMLDir) ->
 
 -spec config_validate(Section :: toml:section(), Key :: toml:key(),
                       Value :: toml:toml_value(), Arg :: term()) ->
-  ok | {ok, term()} | ignore | {error, term()}.
+  ok | {ok, term()} | ignore | {error, badarg}.
 
 config_validate([], "root_dir", Value, _Arg) ->
   case Value of
@@ -571,7 +662,7 @@ cli_opt(["--timeout", Timeout] = _Arg, Opts = #opts{options = CLIOpts}) ->
       % NOTE: we need timeout in milliseconds
       _NewOpts = Opts#opts{options = [{timeout, Seconds * 1000} | CLIOpts]};
     _ ->
-      {error, bad_timeout}
+      {error, {bad_timeout, Timeout}}
   end;
 
 cli_opt("--debug" = _Arg, Opts = #opts{options = CLIOpts}) ->
