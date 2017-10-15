@@ -100,8 +100,11 @@ handle_command(start = _Command,
   end,
   PidFile = proplists:get_value(pidfile, CLIOpts),
   case config_load(ConfigPath) of
-    {ok, AppEnv, IndiraOpts} ->
-      % TODO: add `indira_disk_h:install(error_logger,_)' call
+    {ok, AppEnv, IndiraOpts, ErrorLoggerLog} ->
+      case ErrorLoggerLog of
+        undefined -> ok;
+        _ -> ok = indira_disk_h:install(error_logger, ErrorLoggerLog)
+      end,
       eeindira:set_reload({?MODULE, reload, [ConfigPath]}),
       eeindira:set_env(eersyncd, AppEnv),
       indira_app:daemonize(eersyncd, [
@@ -274,8 +277,11 @@ help(ScriptName) ->
 
 reload(Path) ->
   case config_load(Path) of
-    {ok, AppEnv, IndiraOpts} ->
-      % TODO: add `indira_disk_h:reopen(error_logger,_)' call
+    {ok, AppEnv, IndiraOpts, ErrorLoggerLog} ->
+      case ErrorLoggerLog of
+        undefined -> ok;
+        _ -> ok = indira_disk_h:reopen(error_logger, ErrorLoggerLog)
+      end,
       case indira_app:distributed_reconfigure(IndiraOpts) of
         ok ->
           eeindira:set_env(eersyncd, AppEnv),
@@ -295,9 +301,10 @@ reload(Path) ->
 %% @doc Load configuration file.
 
 -spec config_load(file:filename()) ->
-  {ok, AppEnv, IndiraOpts} | {error, term()}
+  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, term()}
   when AppEnv :: [{atom(), term()}],
-       IndiraOpts :: [indira_app:daemon_option()].
+       IndiraOpts :: [indira_app:daemon_option()],
+       ErrorLoggerLog :: file:filename() | undefined.
 
 config_load(Path) ->
   case toml:read_file(Path, {fun config_validate/4, []}) of
@@ -321,9 +328,10 @@ config_load(Path) ->
 %% @todo More precise error
 
 -spec config_build(toml:config(), file:filename()) ->
-  {ok, AppEnv, IndiraOpts} | {error, bad_config}
+  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, bad_config}
   when AppEnv :: [{atom(), term()}],
-       IndiraOpts :: [indira_app:daemon_option()].
+       IndiraOpts :: [indira_app:daemon_option()],
+       ErrorLoggerLog :: file:filename() | undefined.
 
 config_build(TOMLConfig, TOMLDir) ->
   case toml:get_value([], "modules_config", TOMLConfig) of
@@ -387,7 +395,12 @@ config_build(TOMLConfig, TOMLDir) ->
           {"distributed_immediate", net_start}
         ]
       ),
-      {ok, AppEnv, IndiraOpts}
+      LogFile = case toml:get_value(["logging"], "erlang_log", TOMLConfig) of
+        {string, ErrorLoggerLog} -> filename:join(RootDir, ErrorLoggerLog);
+        none -> undefined;
+        section -> erlang:throw({error, bad_config})
+      end,
+      {ok, AppEnv, IndiraOpts, LogFile}
   end.
 
 %% }}}
