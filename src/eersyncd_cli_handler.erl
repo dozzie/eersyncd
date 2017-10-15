@@ -300,34 +300,220 @@ reload(Path) ->
        IndiraOpts :: [indira_app:daemon_option()].
 
 config_load(Path) ->
-  % TODO: call `toml:read_file(Path, {fun config_validate/4, []})'
-  case file:consult(Path) of
+  case toml:read_file(Path, {fun config_validate/4, []}) of
     {ok, Config} ->
-      {AppEnv, IndiraOpts} = config_build(Config),
-      {ok, AppEnv, IndiraOpts};
+      try
+        config_build(Config, filename:dirname(filename:absname(Path)))
+      catch
+        throw:{error, Reason} ->
+          {error, Reason}
+      end;
     {error, Reason} ->
       {error, Reason}
   end.
 
+%%----------------------------------------------------------
+%% config_build() {{{
+
 %% @doc Build application's and Indira's configuration from values read from
 %%   config file.
+%%
+%% @todo More precise error
 
--spec config_build(toml:config()) ->
-  {AppEnv, IndiraOpts}
+-spec config_build(toml:config(), file:filename()) ->
+  {ok, AppEnv, IndiraOpts} | {error, bad_config}
   when AppEnv :: [{atom(), term()}],
        IndiraOpts :: [indira_app:daemon_option()].
 
-config_build(Config) ->
-  % TODO: build app environment and Indira options properly
-  AppEnv = proplists:get_value(eersyncd, Config),
-  IndiraOpts = proplists:get_value(indira, Config),
-  {AppEnv, IndiraOpts}.
+config_build(TOMLConfig, TOMLDir) ->
+  case toml:get_value([], "modules_config", TOMLConfig) of
+    none ->
+      {error, bad_config};
+    {string, RsyncConf} ->
+      % if "root_dir" is set, it's relative to `TOMLDir' (unless it's
+      % absolute)
+      % if "root_dir" is unset, no changes to paths are made (`"."' is a nice
+      % no-op path)
+      case toml:get_value([], "root_dir", TOMLConfig) of
+        {string, RootDirTail} -> RootDir = filename:join(TOMLDir, RootDirTail);
+        none -> RootDir = "."
+      end,
+      AppEnv = lists:foldr(
+        fun({Section, Name, EnvKey}, Acc) ->
+          case toml:get_value(Section, Name, TOMLConfig) of
+            % these two values are paths that need to be made relative to
+            % `RootDir', all the other values are either paths naturally
+            % relative or not paths at all
+            {_Type, Value} when EnvKey == rsync_path;
+                                EnvKey == error_logger_file ->
+              [{EnvKey, filename:join(RootDir, Value)} | Acc];
+            % this path is relative to TOMLDir (unless it's absolute)
+            {_Type, Value} when EnvKey == cwd ->
+              [{EnvKey, filename:join(TOMLDir, Value)} | Acc];
+            {_Type, Value} ->
+              [{EnvKey, Value} | Acc];
+            none ->
+              Acc;
+            section ->
+              erlang:throw({error, bad_config})
+          end
+        end,
+        [{rsyncd_conf, RsyncConf}],
+        [ % section, name, `eersyncd' app environment key
+          {[],          "root_dir",     cwd},
+          {[],          "rsync_path",   rsync_path},
+          {["tcp"],     "listen",       listen},
+          %{["ssl"],     "listen",       ...}, % TODO
+          %{["ssl"],     "cert_file",    ...}, % TODO
+          %{["ssl"],     "key_file",     ...}, % TODO
+          {["logging"], "rsyncd_log",   rsyncd_log},
+          {["logging"], "log_handlers", log_handlers},
+          {["logging"], "erlang_log",   error_logger_file}
+        ]
+      ),
+      % TODO: make cookie_file relative to `RootDir'
+      IndiraOpts = lists:foldr(
+        fun({Name, EnvKey}, Acc) ->
+          case toml:get_value(["erlang"], Name, TOMLConfig) of
+            {data, Value} -> [{EnvKey, Value} | Acc];
+            none -> Acc
+          end
+        end,
+        [],
+        [
+          {"node_name", node_name},
+          {"name_type", name_type},
+          {"cookie_file", cookie},
+          {"distributed_immediate", net_start}
+        ]
+      ),
+      {ok, AppEnv, IndiraOpts}
+  end.
 
-%-spec config_validate(toml:section(), toml:key(), toml:toml_value(), term()) ->
-%  ok | {ok, term()} | ignore | {error, term()}.
-%
-%config_validate(_Section, _Key, _Value, _Arg) ->
-%  'TODO'.
+%% }}}
+%%----------------------------------------------------------
+%% config_validate() {{{
+
+%% @doc Validate values read from TOML file (callback for
+%%   {@link toml:read_file/2}).
+
+-spec config_validate(Section :: toml:section(), Key :: toml:key(),
+                      Value :: toml:toml_value(), Arg :: term()) ->
+  ok | {ok, term()} | ignore | {error, term()}.
+
+config_validate([], "root_dir", Value, _Arg) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+config_validate([], "modules_config", Value, _Arg) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+config_validate([], "rsync_path", Value, _Arg) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+
+config_validate(["tcp"], "listen", Value, _Arg) ->
+  case Value of
+    {array, {string, AddrSpecs}} ->
+      try lists:map(fun parse_listen/1, AddrSpecs) of
+        Addrs -> {ok, Addrs}
+      catch
+        _:_ -> {error, badarg}
+      end;
+    {array, {empty, []}} ->
+      {ok, []};
+    _ ->
+      {error, badarg}
+  end;
+
+config_validate(["ssl"], "listen", Value, _Arg) ->
+  case Value of
+    {array, {string, AddrSpecs}} ->
+      try lists:map(fun parse_listen/1, AddrSpecs) of
+        Addrs -> {ok, Addrs}
+      catch
+        _:_ -> {error, badarg}
+      end;
+    {array, {empty, []}} ->
+      {ok, []};
+    _ ->
+      {error, badarg}
+  end;
+config_validate(["ssl"], "cert_file", Value, _Arg) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+config_validate(["ssl"], "key_file", Value, _Arg) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+
+config_validate(["logging"], "log_handlers", Value, _Arg) ->
+  case Value of
+    {array, {string, Names}} ->
+      {ok, [{list_to_atom(N), []} || N <- Names]};
+    {array, {empty, []}} ->
+      {ok, []};
+    _ ->
+      {error, badarg}
+  end;
+config_validate(["logging"], "rsyncd_log", Value, _Args) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+config_validate(["logging"], "erlang_log", Value, _Args) ->
+  case Value of
+    {string, [_|_] = _Path} -> ok;
+    _ -> {error, badarg}
+  end;
+
+config_validate(["erlang"], "node_name", Value, _Args) ->
+  case Value of
+    {string, [_|_] = Name} -> {ok, list_to_atom(Name)};
+    _ -> {error, badarg}
+  end;
+config_validate(["erlang"], "name_type", Value, _Args) ->
+  case Value of
+    {string, "longnames"} -> {ok, longnames};
+    {string, "shortnames"} -> {ok, shortnames};
+    _ -> {error, badarg}
+  end;
+config_validate(["erlang"], "cookie_file", Value, _Args) ->
+  case Value of
+    {string, [_|_] = Path} -> {ok, {file, Path}};
+    _ -> {error, badarg}
+  end;
+config_validate(["erlang"], "distributed_immediate", Value, _Args) ->
+  case Value of
+    {boolean, V} -> {ok, V};
+    _ -> {error, badarg}
+  end;
+
+config_validate(_Section, _Key, _Value, _Arg) ->
+  ignore.
+
+%% @doc Parse listen address.
+%%   Function crashes on invalid address format.
+
+-spec parse_listen(string()) ->
+  {any | inet:hostname(), inet:port_number()} | no_return().
+
+parse_listen(AddrPort) ->
+  case string:tokens(AddrPort, ":") of
+    ["*", Port] -> {any, list_to_integer(Port)};
+    [Addr, Port] -> {Addr, list_to_integer(Port)}
+  end.
+
+%% }}}
+%%----------------------------------------------------------
 
 %%%---------------------------------------------------------------------------
 %%% various helpers
