@@ -15,6 +15,8 @@
 %%%---------------------------------------------------------------------------
 %%% types
 
+-define(RELOAD_MUTEX_NAME, '$indira_reload').
+
 %%%---------------------------------------------------------------------------
 %%% public interface
 %%%---------------------------------------------------------------------------
@@ -90,13 +92,52 @@ env_converge(App, Environment) ->
 %% @see set_reload/1
 
 -spec reload() ->
-  term() | {error, reload_not_set}.
+  term() | {error, reload_not_set | reload_in_progress}.
 
 reload() ->
   case application:get_env(indira, reload_function) of
-    {ok, {Mod, Fun, Args}} -> apply(Mod, Fun, Args);
-    undefined -> {error, reload_not_set}
+    {ok, {Mod, Fun, Args}} ->
+      case reload_mutex_lock() of
+        true ->
+          try
+            apply(Mod, Fun, Args)
+          after
+            reload_mutex_unlock()
+          end;
+        false ->
+          {error, reload_in_progress}
+      end;
+    undefined ->
+      {error, reload_not_set}
   end.
+
+%% @doc Try acquiring the mutex that guards reloading procedure.
+
+-spec reload_mutex_lock() ->
+  boolean().
+
+reload_mutex_lock() ->
+  Self = self(),
+  Pid = spawn(fun() ->
+    try register(?RELOAD_MUTEX_NAME, self()) of
+      true ->
+        Self ! {?RELOAD_MUTEX_NAME, self(), true},
+        receive
+          {unlock, Self} -> ok
+        end
+    catch
+      error:badarg ->
+        Self ! {?RELOAD_MUTEX_NAME, self(), false}
+    end
+  end),
+  receive
+    {?RELOAD_MUTEX_NAME, Pid, Result} -> Result
+  end.
+
+%% @doc Release the mutex that guards reloading procedure.
+
+reload_mutex_unlock() ->
+  ?RELOAD_MUTEX_NAME ! {unlock, self()}.
 
 %% @doc Set config reload function.
 %%
