@@ -258,14 +258,13 @@ format_error({not_enough_args, Option}) -> % from `indira_cli:folds()'
   ["missing argument for ", Option];
 
 %% errors from `config_load()'
-format_error({config, validate, Where}) ->
-  % TODO: properly dissect `Where'
-  ["config error: invalid value at ", format_term(Where)];
+format_error({config, validate, {Section, Key, Line} = _Where}) ->
+  ["config error: invalid value of ", format_toml_key(Section, Key),
+    " (line ", integer_to_list(Line), ")"];
 format_error({config, toml, Reason}) ->
   ["config error: ", toml:format_error(Reason)];
-format_error({config, bad_config}) ->
-  % FIXME: change this message
-  "config error: missing mandatory value or section passed for a value";
+format_error({config, {missing, Section, Key}}) ->
+  ["config error: missing required key ", format_toml_key(Section, Key)];
 
 %% errors from `indira_cli:execute()' (TODO: `indira_cli:format_error()')
 format_error({send, bad_request_format}) ->
@@ -322,6 +321,14 @@ format_error(Reason) ->
 
 format_term(Term) ->
   io_lib:print(Term, 1, 16#ffffffff, -1).
+
+%% @doc Format TOML path (section + key name) for error message.
+
+-spec format_toml_key([string()], string()) ->
+  iolist().
+
+format_toml_key(Section, Key) ->
+  [$", [[S, $.] || S <- Section], Key, $"].
 
 %% }}}
 %%----------------------------------------------------------
@@ -391,19 +398,16 @@ reload(Path) ->
        ErrorLoggerLog :: file:filename() | undefined,
        Reason :: {config, validate, Where :: term()}
                | {config, toml, toml:toml_error()}
-               | {config, bad_config}. % missing mandatory value, section for a value
+               | {config, {missing, Section :: [string()], Key :: string()}}.
 
 config_load(Path) ->
   case toml:read_file(Path, {fun config_validate/4, []}) of
     {ok, Config} ->
-      try config_build(Config, filename:dirname(filename:absname(Path))) of
+      case config_build(Config, filename:dirname(filename:absname(Path))) of
         {ok, AppEnv, IndiraOpts, ErrorLoggerLog} ->
           {ok, AppEnv, IndiraOpts, ErrorLoggerLog};
-        {error, bad_config} ->
-          {error, {config, bad_config}}
-      catch
-        throw:{error, bad_config} ->
-          {error, {config, bad_config}}
+        {error, {missing, _, _} = Reason} ->
+          {error, {config, Reason}}
       end;
     {error, {validate, Where, badarg}} ->
       {error, {config, validate, Where}};
@@ -416,19 +420,18 @@ config_load(Path) ->
 
 %% @doc Build application's and Indira's configuration from values read from
 %%   config file.
-%%
-%% @todo More precise error
 
 -spec config_build(toml:config(), file:filename()) ->
-  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, bad_config}
+  {ok, AppEnv, IndiraOpts, ErrorLoggerLog} | {error, Reason}
   when AppEnv :: [{atom(), term()}],
        IndiraOpts :: [indira_app:daemon_option()],
-       ErrorLoggerLog :: file:filename() | undefined.
+       ErrorLoggerLog :: file:filename() | undefined,
+       Reason :: {missing, Section :: [string()], Key :: string()}.
 
 config_build(TOMLConfig, TOMLDir) ->
   case toml:get_value([], "modules_config", TOMLConfig) of
     none ->
-      {error, bad_config};
+      {error, {missing, [], "modules_config"}};
     {string, RsyncConf} ->
       % if "root_dir" is set, it's relative to `TOMLDir' (unless it's
       % absolute)
@@ -453,9 +456,7 @@ config_build(TOMLConfig, TOMLDir) ->
             {_Type, Value} ->
               [{EnvKey, Value} | Acc];
             none ->
-              Acc;
-            section ->
-              erlang:throw({error, bad_config})
+              Acc
           end
         end,
         [{rsyncd_conf, RsyncConf}],
@@ -489,8 +490,7 @@ config_build(TOMLConfig, TOMLDir) ->
       ),
       LogFile = case toml:get_value(["logging"], "erlang_log", TOMLConfig) of
         {string, ErrorLoggerLog} -> filename:join(RootDir, ErrorLoggerLog);
-        none -> undefined;
-        section -> erlang:throw({error, bad_config})
+        none -> undefined
       end,
       {ok, AppEnv, IndiraOpts, LogFile}
   end.
