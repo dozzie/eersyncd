@@ -9,6 +9,7 @@
 -export([set_env/2, default_env/1]).
 -export([reload/0, set_reload/1]).
 -export([wait_for_start/1, is_started/1]).
+-export([format_stacktrace/1]).
 
 -export_type([]).
 
@@ -90,6 +91,7 @@ env_converge(App, Environment) ->
 %% @doc Call reload function.
 %%
 %% @see set_reload/1
+%% @see format_stacktrace/1
 
 -spec reload() ->
   term() | {error, reload_not_set | reload_in_progress}.
@@ -153,6 +155,61 @@ when is_atom(Mod), is_atom(Fun), is_list(Args) ->
     {error, {already_loaded, indira}} -> ok
   end,
   application:set_env(indira, reload_function, MFA).
+
+%% @doc Format stacktrace returned by {@link erlang:get_stacktrace/0} as
+%%   a JSON-serializable object.
+%%
+%% @see indira_json:encode/1
+
+-spec format_stacktrace(StackTrace :: [Entry]) ->
+  [indira_json:jhash()]
+  when Entry :: {Module, Function, Args, Location},
+       Module :: atom(),
+       Function :: atom(),
+       Args :: non_neg_integer() | [term()],
+       Location :: [{atom(), term()}].
+
+format_stacktrace(StackTrace) ->
+  _Result = [
+    [{function, format_function(M, F, A)} | format_location(L)] ||
+    {M, F, A, L} <- StackTrace
+  ].
+
+%% @doc Format function name as a string (binary).
+
+-spec format_function(atom(), atom(), integer() | list()) ->
+  binary().
+
+format_function(Mod, Fun, Args) when is_list(Args) ->
+  format_function(Mod, Fun, length(Args));
+format_function(Mod, Fun, Arity) when is_integer(Arity) ->
+  iolist_to_binary([
+    atom_to_list(Mod), $:,
+    atom_to_list(Fun), $/,
+    integer_to_list(Arity)
+  ]).
+
+%% @doc Format location as a JSON-serializable hash.
+
+-spec format_location([{atom(), term()}]) ->
+  indira_json:jhash().
+
+format_location([] = _Location) ->
+  [{}];
+format_location(Location) ->
+  [format_location_element(E) || E <- Location].
+
+%% @doc Workhorse for {@link format_location/1}.
+
+-spec format_location_element({atom(), term()}) ->
+  {indira_json:jstring(), indira_json:jscalar()}.
+
+format_location_element({file, File}) when is_list(File) ->
+  {file, list_to_binary(File)};
+format_location_element({line, Line}) when is_integer(Line) ->
+  {line, Line};
+format_location_element({Name, Value}) ->
+  {Name, iolist_to_binary(io_lib:print(Value, 1, 16#FFFFFFFF, -1))}.
 
 %%%---------------------------------------------------------------------------
 

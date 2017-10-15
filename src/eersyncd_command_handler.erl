@@ -61,7 +61,7 @@ handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
       % XXX: this crash should never happen and is a programming error
       log_error(reload, "reload crash", [
         {crash, Type}, {error, {term, Error}},
-        {stack_trace, {term, erlang:get_stacktrace()}}
+        {stack_trace, eeindira:format_stacktrace(erlang:get_stacktrace())}
       ]),
       [{result, error},
         {message, <<"reload function crashed, check logs for details">>}]
