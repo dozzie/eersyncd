@@ -52,9 +52,11 @@ handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
       log_info(reload, "another reload in progress", []),
       [{result, error}, {message, <<"reload command already in progress">>}];
     {error, Errors} ->
-      % TODO: change the formatting of the errors
+      % TODO: `eersyncd_cli_handler:reload()' (whose result is returned here)
+      % is intended to return `{error, ReadError :: binary()}' or
+      % `{error, [{Subsystem, ReloadError}]}', so it's simpler to log and
+      % reply to CLI script
       log_error(reload, "reload errors", [{errors, {term, Errors}}]),
-      % TODO: explain the errors (`eersyncd_cli_handler:format_error()')
       [{result, error}, {message, <<"reload errors (TODO: describe)">>}]
   catch
     Type:Error ->

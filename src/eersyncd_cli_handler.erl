@@ -362,6 +362,10 @@ help(ScriptName) ->
 
 %% @doc Update application environment from config file and instruct
 %%   application's processes to reread their parameters.
+%%
+%% @todo Return errors in the form of
+%%   {@type binary() | [@{Subsystem :: atom(), Error :: binary()@}]}, so they
+%%   are ready to return from {@link eersyncd_command_handler}
 
 -spec reload(file:filename()) ->
   ok | {error, term()}.
