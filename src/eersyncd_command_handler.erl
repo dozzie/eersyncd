@@ -25,13 +25,13 @@
 
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, false}] = _Command,
                _Args) ->
-  case eeindira:is_started(eersyncd) of
+  case indira_app:is_started(eersyncd) of
     true  -> [{result, running}];
     false -> [{result, stopped}]
   end;
 handle_command([{<<"command">>, <<"status">>}, {<<"wait">>, true}] = _Command,
                _Args) ->
-  case eeindira:wait_for_start(eersyncd_sup) of
+  case indira_app:wait_for_start(eersyncd_sup) of
     ok    -> [{result, running}];
     error -> [{result, stopped}]
   end;
@@ -43,7 +43,7 @@ handle_command([{<<"command">>, <<"stop">>}] = _Command, _Args) ->
 
 handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
   log_info(reload, "reloading configuration", []),
-  try eeindira:reload() of
+  try indira_app:reload() of
     ok ->
       [{result, ok}];
     {error, reload_not_set} ->
@@ -61,7 +61,7 @@ handle_command([{<<"command">>, <<"reload_config">>}] = _Command, _Args) ->
       % XXX: this crash should never happen and is a programming error
       log_error(reload, "reload crash", [
         {crash, Type}, {error, {term, Error}},
-        {stack_trace, eeindira:format_stacktrace(erlang:get_stacktrace())}
+        {stack_trace, indira_app:format_stacktrace(erlang:get_stacktrace())}
       ]),
       [{result, error},
         {message, <<"reload function crashed, check logs for details">>}]

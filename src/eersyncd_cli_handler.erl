@@ -106,11 +106,11 @@ handle_command(start = _Command,
         undefined -> ok;
         _ -> ok = indira_disk_h:install(error_logger, ErrorLoggerLog)
       end,
-      eeindira:set_reload({?MODULE, reload, [ConfigPath]}),
-      eeindira:set_env(eersyncd, AppEnv),
+      ok = indira_app:set_env(eersyncd, AppEnv),
       indira_app:daemonize(eersyncd, [
         {listen, [{?ADMIN_SOCKET_TYPE, Socket}]},
         {command, {?ADMIN_COMMAND_MODULE, []}},
+        {reload, {?MODULE, reload, [ConfigPath]}},
         {start_before, SASLApp},
         {pidfile, PidFile} |
         IndiraOpts
@@ -375,7 +375,7 @@ reload(Path) ->
       end,
       case indira_app:distributed_reconfigure(IndiraOpts) of
         ok ->
-          eeindira:set_env(eersyncd, AppEnv),
+          ok = indira_app:set_env(eersyncd, AppEnv),
           % TODO: handle (propagate) reload errors
           LogHandlers = proplists:get_value(log_handlers, AppEnv, []),
           % TODO: send reload signal to the candidate modules
